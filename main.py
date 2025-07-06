@@ -3,6 +3,7 @@ import requests
 from collections import defaultdict
 import asyncio
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # === CONFIG ===
@@ -19,8 +20,10 @@ groq_models = [
 
 client = TelegramClient('session_mithun', api_id, api_hash)
 conversation_history = defaultdict(list)
+manual_reply_tracker = defaultdict(lambda: 0)
+MANUAL_REPLY_TIMEOUT = 48 # in seconds
 
-# Uptime server
+# === Uptime Server ===
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -36,17 +39,32 @@ def start_web():
 
 threading.Thread(target=start_web, daemon=True).start()
 
-# Telegram event handler
+# === Track Your Manual Messages ===
+@client.on(events.NewMessage(outgoing=True))
+async def track_manual_reply(event):
+    if event.is_private:
+        user_id = event.chat_id
+        manual_reply_tracker[user_id] = time.time()
+        print(f"⏱️ You manually replied to user {user_id}. AI replies paused temporarily.")
+
+# === AI Auto-Reply ===
 @client.on(events.NewMessage(incoming=True))
-async def handler(event):
+async def ai_reply_handler(event):
     sender = await event.get_sender()
     message = event.raw_text
 
     if event.is_private and not sender.bot:
-        print(f"\n📩 {sender.first_name}: {message}")
         user_id = sender.id
+
+        # Check if you manually messaged them recently
+        if time.time() - manual_reply_tracker[user_id] < MANUAL_REPLY_TIMEOUT:
+            print(f"⛔ Skipping reply to {sender.first_name} (manual reply detected recently)")
+            return
+
+        print(f"\n📩 {sender.first_name}: {message}")
         conversation_history[user_id].append({"role": "user", "content": message})
 
+        # Keep history short
         if len(conversation_history[user_id]) > 6:
             conversation_history[user_id] = conversation_history[user_id][-6:]
 
@@ -88,7 +106,7 @@ async def handler(event):
             except Exception as e:
                 print(f"❌ Model {model} error:", str(e))
 
-# Final async runner
+# === Main ===
 async def main():
     await client.connect()
     print("🤖 Telegram auto-reply bot is starting...")
