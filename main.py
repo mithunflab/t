@@ -93,5 +93,5 @@ def run_http_server():
 if __name__ == "__main__":
     threading.Thread(target=run_http_server, daemon=True).start()
     print("🤖 Telegram auto-reply bot is starting...")
-    client.start()
+    client.connect()
     client.run_until_disconnected()
