@@ -1,8 +1,9 @@
 from telethon import TelegramClient, events
 import requests
 from collections import defaultdict
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import asyncio
 import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # === CONFIG ===
 api_id = 22986717
@@ -19,6 +20,23 @@ groq_models = [
 client = TelegramClient('session_mithun', api_id, api_hash)
 conversation_history = defaultdict(list)
 
+# Uptime server
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+    def log_message(self, format, *args):
+        return
+
+def start_web():
+    server = HTTPServer(('0.0.0.0', 10000), PingHandler)
+    print("✅ Web ping server started on port 10000")
+    server.serve_forever()
+
+threading.Thread(target=start_web, daemon=True).start()
+
+# Telegram event handler
 @client.on(events.NewMessage(incoming=True))
 async def handler(event):
     sender = await event.get_sender()
@@ -28,6 +46,7 @@ async def handler(event):
         print(f"\n📩 {sender.first_name}: {message}")
         user_id = sender.id
         conversation_history[user_id].append({"role": "user", "content": message})
+
         if len(conversation_history[user_id]) > 6:
             conversation_history[user_id] = conversation_history[user_id][-6:]
 
@@ -36,15 +55,15 @@ async def handler(event):
                 "role": "system",
                 "content": (
                     "You are Mithun. You are talking to your friends and family casually. "
-                    "You often use Tamil-English mixed messages. Use emojis, be chill and casual."
+                    "You often use Tamil-English mixed messages. You like to be funny but real. "
+                    "Speak in a way that feels like a chill WhatsApp or Telegram chat. Use slang and emojis if needed."
                 )
             }
         ] + conversation_history[user_id]
 
-        ai_reply = None
-
         for model in groq_models:
             try:
+                print(f"🧠 Trying model: {model}")
                 response = requests.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={
@@ -57,41 +76,24 @@ async def handler(event):
                         "temperature": 0.7
                     }
                 )
+
                 if response.status_code == 200:
                     json_data = response.json()
                     if "choices" in json_data:
                         ai_reply = json_data['choices'][0]['message']['content']
-                        print(f"🤖 {model}: {ai_reply}")
+                        print(f"🤖 Replying with {model}: {ai_reply}")
                         await event.reply(ai_reply)
                         conversation_history[user_id].append({"role": "assistant", "content": ai_reply})
                         break
             except Exception as e:
-                print(f"❌ {model} failed:", str(e))
+                print(f"❌ Model {model} error:", str(e))
 
-        if not ai_reply:
-            print("❌ All models failed. No reply sent.")
-
-# === SIMPLE HTTP SERVER TO KEEP RENDER FREE TIER ALIVE ===
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is running!")
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-
-def run_http_server():
-    server = HTTPServer(('0.0.0.0', 10000), SimpleHandler)
-    print("✅ Web ping server started on port 10000")
-    server.serve_forever()
-
-# === RUN EVERYTHING ===
-if __name__ == "__main__":
-    threading.Thread(target=run_http_server, daemon=True).start()
+# Final async runner
+async def main():
+    await client.connect()
     print("🤖 Telegram auto-reply bot is starting...")
-    client.connect()
-    client.run_until_disconnected()
+    await client.run_until_disconnected()
+
+asyncio.run(main())
+
+
