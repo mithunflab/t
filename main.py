@@ -1,26 +1,36 @@
-from telethon import TelegramClient, events, functions, types
+from telethon import TelegramClient, events, functions
 import requests
-from collections import defaultdict
 import asyncio
 import threading
-import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from collections import defaultdict
+import re
 
 # === CONFIG ===
 api_id = 22986717
 api_hash = '1d1206253d640d42f488341e3b4f0a2f'
 groq_api_key = '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'
+session_name = 'session_mithun'
 
-groq_models = ["llama3-8b-8192", "gemma-7b-it", "llama2-70b-4096"]
-client = TelegramClient('session_mithun', api_id, api_hash)
-
+# === GLOBAL STATE ===
 conversation_history = defaultdict(list)
-active_user_ids = set()
-last_seen = {}
-target_conversations = {}
-summarizing = {}
+pause_ai = set()   # user_id where AI is paused
+force_ai = set()   # user_id where AI is forced even if you're online
+manual_chatting_with = None  # Track who you're chatting with
+bot_usernames = ['Telethonpy_bot']  # List your bot usernames
 
-# === Keep-alive server ===
+# === MODELS ===
+groq_models = [
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "gemma-7b-it",
+    "llama2-70b-4096"
+]
+
+# === CLIENT INIT ===
+client = TelegramClient(session_name, api_id, api_hash)
+
+# === WEB SERVER FOR UPTIME ===
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -36,146 +46,108 @@ def start_web():
 
 threading.Thread(target=start_web, daemon=True).start()
 
-# === Message Generator ===
-def query_groq(messages, model=None, max_tokens=300):
-    headers = {
-        "Authorization": f"Bearer {groq_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": model or groq_models[0],
-        "messages": messages,
-        "temperature": 0.7,
-        "max_tokens": max_tokens
-    }
-    response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
-    return None
+# === AI GENERATION ===
+def generate_ai_reply(messages):
+    for model in groq_models:
+        try:
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {groq_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.7
+                }
+            )
+            if res.status_code == 200 and 'choices' in res.json():
+                return res.json()['choices'][0]['message']['content']
+        except Exception as e:
+            print(f"Model {model} error: {e}")
+    return "🤖 Sorry, something went wrong with AI."
 
-# === Auto-reply Logic ===
+# === MAIN REPLY HANDLER ===
 @client.on(events.NewMessage(incoming=True))
-async def auto_reply(event):
+async def handle_msg(event):
+    global manual_chatting_with
     sender = await event.get_sender()
     user_id = sender.id
-    message = event.raw_text
+    message = event.raw_text.strip()
 
-    # Track online presence
-    last_seen[user_id] = time.time()
+    # Bot Command Parser
+    if event.is_private and not sender.bot:
+        if message == "/":
+            pause_ai.add(user_id)
+            await event.reply("🤖 Paused AI replies for this chat.")
+            return
+        elif message == "\\":
+            force_ai.add(user_id)
+            await event.reply("🤖 Forced AI replies ON for this chat.")
+            return
 
-    # Ignore bots or group messages
-    if not event.is_private or sender.bot:
+    # If this is from your bot to you (e.g. @Telethonpy_bot)
+    if sender.username in bot_usernames:
+        if re.search(r"msg|message\s+(him|her|\+?\d+)", message, re.I):
+            target_match = re.findall(r"\+?\d{10,15}|him|her", message)
+            if target_match:
+                target_ref = target_match[0]
+                print(f"👆 You instructed to message: {target_ref}")
+
+                if target_ref.lower() in ["him", "her"]:
+                    if manual_chatting_with:
+                        await client.send_message(manual_chatting_with, "Hey, what's up! 👋")
+                elif target_ref.startswith("+") or target_ref.isdigit():
+                    try:
+                        ent = await client.get_entity(target_ref)
+                        await client.send_message(ent, "Hey! I'm Mithun. Let's chat 😊")
+                    except Exception as e:
+                        await event.reply(f"❌ Could not message: {e}")
+            return
+
+    # === Ignore paused ===
+    if user_id in pause_ai and user_id not in force_ai:
+        print(f"⏸️ AI paused for {user_id}")
         return
 
-    # Pause AI if you're manually chatting with this user
-    if user_id in active_user_ids:
-        print(f"⏸️ Skipping auto-reply for active chat with {sender.first_name}")
+    # Track who you're manually chatting with
+    me = await client.get_me()
+    if event.is_private:
+        async for msg in client.iter_messages(event.chat_id, limit=1, from_user=me):
+            if msg.date.timestamp() > event.message.date.timestamp():
+                manual_chatting_with = user_id
+                print(f"✋ You're manually replying to {user_id}")
+                return
+
+    # Skip if you’re manually chatting with this person
+    if manual_chatting_with == user_id and user_id not in force_ai:
+        print(f"🤐 Suppressing AI since you're chatting manually with {user_id}")
         return
 
-    # If this user is a Groq instruction target
-    if event.chat_id in target_conversations:
-        target_conversations[event.chat_id]['messages'].append({"role": "user", "content": message})
-        return
-
-    print(f"\n📩 {sender.first_name}: {message}")
+    # Process AI reply
+    print(f"📨 Message from {sender.first_name}: {message}")
     conversation_history[user_id].append({"role": "user", "content": message})
     conversation_history[user_id] = conversation_history[user_id][-6:]
 
-    system_prompt = {
-        "role": "system",
-        "content": (
-            "You are Mithun. You talk to friends and family in a casual Tamil-English way. "
-            "Use emojis, slang, and sound like a chill human. Avoid being too formal."
-        )
-    }
-    messages = [system_prompt] + conversation_history[user_id]
-
-    for model in groq_models:
-        try:
-            ai_reply = query_groq(messages, model)
-            if ai_reply:
-                print(f"🤖 Replying with {model}: {ai_reply}")
-                await event.reply(ai_reply)
-                conversation_history[user_id].append({"role": "assistant", "content": ai_reply})
-                break
-        except Exception as e:
-            print(f"❌ Error from model {model}: {e}")
-
-# === AI Command from Bot Chat ===
-@client.on(events.NewMessage(from_users='Telethonpy_bot', pattern=r'.*'))
-async def command_handler(event):
-    cmd = event.raw_text.strip().lower()
-    print(f"📥 Command: {cmd}")
-
-    # Get Groq summary of command
-    prompt = [
+    messages = [
         {
             "role": "system",
             "content": (
-                "You're a task interpreter. Extract target username and task from informal commands. "
-                "Respond with JSON like {\"action\": \"message\", \"target\": \"@username\", \"text\": \"message to send\"}."
+                "You are Mithun. You are chatting with friends and family in Tamil-English mix, casually and warmly."
             )
-        },
-        {"role": "user", "content": cmd}
-    ]
-    try:
-        parsed = query_groq(prompt, max_tokens=150)
-        print("🧠 Groq parsed:", parsed)
-        import json
-        result = json.loads(parsed)
+        }
+    ] + conversation_history[user_id]
 
-        if result.get("action") == "message" and "target" in result:
-            target_username = result["target"].replace("@", "")
-            target_entity = await client.get_entity(target_username)
-            if not target_entity:
-                await event.reply("❌ Could not find that user.")
-                return
+    ai_reply = generate_ai_reply(messages)
+    await event.reply(ai_reply)
+    conversation_history[user_id].append({"role": "assistant", "content": ai_reply})
 
-            target_id = target_entity.id
-            ai_msgs = [{
-                "role": "system",
-                "content": f"You are Mithun. Start a casual conversation with {target_username} like a friend."
-            }]
-            if result.get("text"):
-                ai_msgs.append({"role": "user", "content": result["text"]})
-
-            target_conversations[target_id] = {
-                "entity": target_entity,
-                "messages": ai_msgs
-            }
-            await client.send_message(target_entity, ai_msgs[-1]["content"])
-            await event.reply(f"✅ Started chatting with @{target_username}")
-    except Exception as e:
-        print("⚠️ Error handling command:", e)
-        await event.reply("❌ Failed to understand your request.")
-
-# === Periodic Summary Checker ===
-async def monitor_and_summarize():
-    while True:
-        now = time.time()
-        for user_id in list(target_conversations.keys()):
-            if user_id in last_seen and now - last_seen[user_id] > 60 and not summarizing.get(user_id):
-                # User has been idle for over 60 seconds
-                print(f"📝 Summarizing conversation with user {user_id}")
-                summarizing[user_id] = True
-                messages = target_conversations[user_id]["messages"][-10:]
-                messages.insert(0, {
-                    "role": "system",
-                    "content": "Summarize this conversation in 3 lines."
-                })
-                summary = query_groq(messages, max_tokens=100)
-                if summary:
-                    bot_chat = await client.get_entity('Telethonpy_bot')
-                    await client.send_message(bot_chat, f"📝 Chat Summary:\n{summary}")
-                del target_conversations[user_id]
-                del summarizing[user_id]
-        await asyncio.sleep(30)
-
-# === Main async runner ===
+# === ASYNC MAIN ===
 async def main():
-    await client.start()
+    await client.connect()
     print("🤖 Telegram auto-reply bot is starting...")
-    asyncio.create_task(monitor_and_summarize())
     await client.run_until_disconnected()
 
 asyncio.run(main())
+
