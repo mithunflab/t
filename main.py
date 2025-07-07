@@ -222,7 +222,7 @@ async def monitor_summaries():
 # === MAIN ===
 async def main():
     try:
-        logger.info("Starting Telethon bot client")
+        logger.info(f"Starting Telethon bot client with api_id={api_id}, bot_token={bot_token[:10]}...")
         await client.start(bot_token=bot_token)
         me = await client.get_me()
         logger.info(f"Bot started, logged in as {me.username or me.id}")
@@ -232,6 +232,7 @@ async def main():
         )
     except Exception as e:
         logger.error(f"Bot failed to start: {e}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())
