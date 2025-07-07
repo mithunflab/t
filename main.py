@@ -1,6 +1,6 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
-from telethon.errors import PeerIdInvalidError, FloodWaitError
+from telethon.errors import PeerIdInvalidError, FloodWaitError, ApiIdInvalidError
 import requests
 import asyncio
 import threading
@@ -230,6 +230,9 @@ async def main():
             client.run_until_disconnected(),
             monitor_summaries()
         )
+    except ApiIdInvalidError:
+        logger.error("Invalid api_id/api_hash combination. Please verify credentials at https://my.telegram.org and ensure they match the Telegram account that created the bot.")
+        raise
     except Exception as e:
         logger.error(f"Bot failed to start: {e}")
         raise
