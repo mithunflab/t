@@ -149,8 +149,7 @@ async def monitor_summary():
                         {"role": "system", "content": "Summarize this conversation briefly as Mithun chatted with the person and summarize what they said."}
                     ] + history
                     summary = generate_ai_reply(summary_prompt)
-                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:
-\n{summary}")
+                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:\n{summary}")
                 expired.append(user_id)
         for uid in expired:
             del active_conversations[uid]
@@ -166,4 +165,5 @@ async def main():
     )
 
 asyncio.run(main())
+
 
