@@ -7,7 +7,6 @@ from flask import Flask
 from collections import defaultdict
 import re
 import time
-import uuid
 
 # === CONFIG ===
 api_id = 22986717
@@ -17,7 +16,7 @@ groq_key_auto_reply = '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'
 groq_key_bot = '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'  # For bot commands
 scout_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
 bot_username = '@Telethonpy_bot'
-ignored_usernames = {'Telethonpy_bot', 'Lunaclaude_bot'}
+ignored_usernames = {'telethonpy_bot', 'lunaclaude_bot'}
 reaction_emoji = '👍'  # Emoji to react with when conversation ends
 summary_interval = 120  # Seconds of inactivity before considering conversation ended
 
@@ -113,9 +112,7 @@ async def handle(event):
                 active_conversations[entity_id] = time.time()
                 conversation_history[entity_id].append({"role": "user", "content": msg_text})
                 conversation_history[entity_id].append({"role": "assistant", "content": ai_msg})
-                await event.reply(f"✅ Started chat with {targetස
-
-ystem: target_display}.")
+                await event.reply(f"✅ Started chat with {target_display}.")
             except Exception as e:
                 await event.reply(f"❌ Failed to send message: {e}")
         return
@@ -191,7 +188,7 @@ async def monitor_summaries():
 # === MAIN ===
 async def main():
     await client.start()
-    print("�belethon AI bot is running!")
+    print("🤖 Telethon AI bot is running!")
     await asyncio.gather(
         client.run_until_disconnected(),
         monitor_summaries()
@@ -199,5 +196,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
