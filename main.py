@@ -1,6 +1,6 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
-from telethon.errors import PeerIdInvalidError, FloodWaitError, SessionPasswordNeededError
+from telethon.errors import PeerIdInvalidError, FloodWaitError
 import requests
 import asyncio
 import threading
@@ -12,8 +12,8 @@ import os
 import logging
 
 # === CONFIG ===
-bot_token = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Replace with your @Telethonpy_bot token
-session_name = '/opt/render/project/src/bot_session'  # Bot session file
+bot_token = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Replace with @Telethonpy_bot token
+session_name = '/opt/render/project/src/bot_session'
 groq_key_auto_reply = os.getenv('GROQ_KEY_AUTO_REPLY', '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')
 groq_key_bot = os.getenv('GROQ_KEY_BOT', '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')
 scout_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
@@ -120,10 +120,8 @@ async def handle(event):
             target_display = f"@{entity.username}" if entity.username else target
             # Generate context-specific message
             prompt = [
-                {"role": "system", "content": f"You are {bot_username}, a polite Telegram bot. Craft a friendly, concise invitation from {bot_username} in Tamil-English if appropriate. If the message mentions a party, ਪ
-
-System: arty, make it an enthusiastic party invitation."},
-                {"role": "user", "content": f"Invite {target} to an event with this message: {msg_text}"}
+                {"role": "system", "content": f"You are {bot_username}, a friendly and polite Telegram assistant bot. Craft a concise, warm message in English if appropriate. If the message mentions a party, create an enthusiastic party invitation. Always maintain a professional and courteous tone, acting like a personal assistant."},
+                {"role": "user", "content": f"Send a message to {target} with this content: {msg_text}"}
             ]
             logger.info(f"Generating AI message for {target}")
             ai_msg = generate_reply(prompt, use_scout=True, use_bot_api=True)
@@ -135,7 +133,7 @@ System: arty, make it an enthusiastic party invitation."},
             await event.reply(f"✅ Sent message to {target_display}.")
         except PeerIdInvalidError:
             logger.error(f"Invalid peer: {target}")
-            await event.reply(f"❌ Cannot send message to {target}. Ð°Ð½Ð°Ð¿Ð¾Ð»Ð°Ð²Ð°Ð½Ð¸Ñ ÐºÐ¾Ð½ÑÐ°ÐºÑÐ¾Ð² Ñ Ð±Ð¾ÑÐ¾Ð¼. Ð¡Ð¿ÑÐ¾ÑÐ¸ÑÐµ Ð¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°ÑÐµÐ»Ñ {target} Ð¾ÑÐ¿ÑÐ°Ð²Ð¸ÑÑ Ð²Ð°Ð¼ ÑÐ¾Ð¾Ð±ÑÐµÐ½Ð¸Ðµ Ð¸Ð»Ð¸ Ð´Ð¾Ð±Ð°Ð²ÑÑÐµ Ð±Ð¾Ñ Ð² ÑÐ¿Ð¸ÑÐ¾Ðº ÐºÐ¾Ð½ÑÐ°ÐºÑÐ¾Ð².")
+            await event.reply(f(?)f"❌ Cannot send message to {target}. They may have restricted messages from non-contacts. Ask them to send /start to {bot_username} or set their privacy to allow messages from everybody (Settings > Privacy and Security > Who can send me messages? > Everybody).")
         except FloodWaitError as e:
             logger.error(f"Flood wait error: {e}")
             await event.reply(f"❌ Telegram rate limit reached. Please wait {e.seconds} seconds and try again.")
@@ -165,7 +163,7 @@ System: arty, make it an enthusiastic party invitation."},
     conversation_history[uid].append({"role": "user", "content": text})
     conversation_history[uid] = conversation_history[uid][-6:]
     prompt = [
-        {"role": "system", "content": f"You are {bot_username}, a polite and friendly Telegram bot. Respond warmly in Tamil-English if appropriate, and always maintain a courteous tone. End the conversation with a polite closing if it seems to be over."},
+        {"role": "system", "content": f"You are {bot_username}, a polite and friendly Telegram assistant bot. Respond warmly in English , acting like a personal assistant. Maintain context from previous messages and end with a polite closing if the conversation seems over."},
         *conversation_history[uid]
     ]
     logger.info(f"Generating auto-reply for {uid}")
@@ -178,7 +176,10 @@ System: arty, make it an enthusiastic party invitation."},
     # Check if conversation seems over
     if re.search(r'\b(bye|thanks|ok|goodbye|later|gtg|ttyl)\b', text.lower()):
         logger.info(f"Conversation with {uid} seems over, reacting with {reaction_emoji}")
-        await reply_msg.react(reaction_emoji)
+        try:
+            await reply_msg.react(reaction_emoji)
+        except Exception as e:
+            logger.error(f"Failed to react to message from {uid}: {e}")
 
 # === AUTO SUMMARY AND REACTION ===
 async def monitor_summaries():
@@ -190,7 +191,7 @@ async def monitor_summaries():
                 hist = conversation_history.get(uid, [])[-8:]
                 if hist:
                     prompt = [
-                        {"role": "system", "content": "Summarize this conversation in up to 10 lines, including what the bot and the user said. Use a polite and professional tone."},
+                        {"role": "system", "content": f"You are {bot_username}, summarizing a conversation in up to 10 lines. Include what you and the user said, using a polite and professional tone."},
                         *hist
                     ]
                     logger.info(f"Generating summary for {uid}")
@@ -203,7 +204,10 @@ async def monitor_summaries():
                         async for msg in client.iter_messages(uid, limit=1, from_user=user):
                             if not msg.reactions:
                                 logger.info(f"Reacting to last message from {uid} with {reaction_emoji}")
-                                await msg.react(reaction_emoji)
+                                try:
+                                    await msg.react(reaction_emoji)
+                                except Exception as e:
+                                    logger.error(f"Failed to react to message from {uid}: {e}")
                     except Exception as e:
                         logger.error(f"Failed to send summary for {uid}: {e}")
                 done.append(uid)
