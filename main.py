@@ -14,7 +14,7 @@ import logging
 # === CONFIG ===
 # Environment variables with fallbacks from provided values
 api_id = int(os.getenv('API_ID', '22986717'))
-api_hash = os.getenv('API_HASH', '2d1206253d640d42f488341e3b4f0a2f')
+api_hash = os.getenv('API_HASH', '1d1206253d640d42f488341e3b4f0a2f')
 bot_token = os.getenv('BOT_TOKEN', '7275314987:AAHfuJwuR6-9L8Powjoc7UCLuT89KXpVi0I')
 session_name = '/opt/render/project/src/bot_session'  # Render-compatible session file
 groq_key_auto_reply = os.getenv('GROQ_KEY_AUTO_REPLY', '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')
