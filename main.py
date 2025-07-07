@@ -12,7 +12,7 @@ api_id = 22986717
 api_hash = '1d1206253d640d42f488341e3b4f0a2f'
 groq_api_key = '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'
 session_name = 'session_mithun'
-bot_username = 'Telethonpy_bot'
+bot_usernames = ['Telethonpy_bot', 'Lunaclaude_bot']
 
 # === STATE ===
 client = TelegramClient(session_name, api_id, api_hash)
@@ -30,19 +30,13 @@ groq_models = [
     "llama2-70b-4096"
 ]
 
-# === UPTIME SERVER ===
+# === FLASK UPTIME SERVER ===
 app = Flask(__name__)
-
 @app.route("/", methods=["GET", "HEAD"])
-def ping():
-    return "Bot is alive!", 200
+def ping(): return "Bot is alive!", 200
+threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000), daemon=True).start()
 
-def start_web():
-    app.run(host="0.0.0.0", port=10000)
-
-threading.Thread(target=start_web, daemon=True).start()
-
-# === GROQ AI ===
+# === AI REPLY ===
 def generate_ai_reply(messages):
     for model in groq_models:
         try:
@@ -54,60 +48,60 @@ def generate_ai_reply(messages):
                 },
                 json={
                     "model": model,
-                    "messages": messages[-10:],  # limit tokens
+                    "messages": messages[-10:],
                     "temperature": 0.7
                 }
             )
-            if res.status_code == 200 and 'choices' in res.json():
+            if res.ok and 'choices' in res.json():
                 return res.json()['choices'][0]['message']['content']
         except Exception as e:
-            print(f"Model {model} error: {e}")
-    return "🤖 Sorry, something went wrong."
+            print(f"⚠️ Model error: {model} – {e}")
+    return "🤖 Sorry, AI failed."
 
-# === AI HANDLER ===
+# === INCOMING MESSAGE HANDLER ===
 @client.on(events.NewMessage(incoming=True))
 async def handle(event):
     global manual_chatting_with
-
     sender = await event.get_sender()
     user_id = sender.id
     message = event.raw_text.strip()
+    username = (sender.username or "").lower()
 
-    # Ignore if it's from the bot
-    if sender.username == bot_username:
-        if re.search(r'\b(msg|message)\b', message, re.I):
-            target = re.findall(r'@[\w\d_]+|\+?\d{10,15}|him|her', message, re.I)
-            if target:
-                target_ref = target[0]
-                if target_ref.lower() in ['him', 'her'] and manual_chatting_with:
-                    await client.send_message(manual_chatting_with, "👋 Hey! I'm Mithun, let's talk.")
-                    active_conversations[manual_chatting_with] = time.time()
-                    await event.reply("✅ Started chat with them.")
-                elif target_ref.startswith("@") or target_ref.startswith("+") or target_ref.isdigit():
-                    try:
-                        entity = await client.get_entity(target_ref)
+    # Block AI replies to these bots
+    if username in [u.lower() for u in bot_usernames]:
+        if username == "telethonpy_bot":
+            # Start new chat by command: "msg @user" or "message +91..."
+            match = re.search(r"(msg|message)\s+(@[\w\d_]+|\+?\d{10,15}|him|her)", message, re.I)
+            if match:
+                target = match.group(2)
+                try:
+                    if target.lower() in ['him', 'her'] and manual_chatting_with:
+                        await client.send_message(manual_chatting_with, "👋 Hey! I'm Mithun, let's talk.")
+                        active_conversations[manual_chatting_with] = time.time()
+                        await event.reply("✅ Chat started with previous person.")
+                    else:
+                        entity = await client.get_entity(target)
                         await client.send_message(entity, "👋 Hey! I'm Mithun, let's talk.")
                         active_conversations[entity.id] = time.time()
-                        await event.reply(f"✅ Started chat with {target_ref}.")
-                    except Exception as e:
-                        await event.reply(f"❌ Could not message: {e}")
-        return
+                        await event.reply(f"✅ Started chat with {target}.")
+                except Exception as e:
+                    await event.reply(f"❌ Error: {e}")
+        return  # Never reply to Telethonpy_bot or Lunaclaude_bot
 
-    # Handle pause/force
+    # Pause & force control
     if message == "/":
         pause_ai.add(user_id)
-        await event.reply("🤖 Paused AI for this user.")
+        await event.reply("⏸️ AI paused.")
         return
     elif message == "\\":
         force_ai.add(user_id)
-        await event.reply("🤖 Forced AI ON for this user.")
+        await event.reply("✅ AI forced ON.")
         return
 
-    # If paused and not forced
     if user_id in pause_ai and user_id not in force_ai:
         return
 
-    # Check if you're manually replying
+    # Manual typing detection
     me = await client.get_me()
     if event.is_private:
         async for msg in client.iter_messages(event.chat_id, limit=1, from_user=me):
@@ -115,57 +109,45 @@ async def handle(event):
                 manual_chatting_with = user_id
                 return
 
-    # If you're chatting manually with this person
     if manual_chatting_with == user_id and user_id not in force_ai:
         return
 
-    # Store conversation
+    # AI conversation
+    print(f"📨 {sender.first_name}: {message}")
     conversation_history[user_id].append({"role": "user", "content": message})
     conversation_history[user_id] = conversation_history[user_id][-6:]
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are Mithun. You are chatting casually in Tamil-English mix. Be friendly and real."
-            )
-        }
-    ] + conversation_history[user_id]
+    ai_prompt = [{"role": "system", "content": "You are Mithun, chatting with friends/family in Tamil-English mix."}]
+    ai_prompt += conversation_history[user_id]
 
-    ai_reply = generate_ai_reply(messages)
-    await event.reply(ai_reply)
-    conversation_history[user_id].append({"role": "assistant", "content": ai_reply})
-
-    # Update last activity
+    reply = generate_ai_reply(ai_prompt)
+    await event.reply(reply)
+    conversation_history[user_id].append({"role": "assistant", "content": reply})
     active_conversations[user_id] = time.time()
 
-# === CONVO SUMMARY CHECKER ===
+# === MONITOR CONVERSATION AND SUMMARIZE ===
 async def monitor_summary():
     while True:
         now = time.time()
-        to_remove = []
-        for user_id, last_seen in active_conversations.items():
-            if now - last_seen > 120:  # 2 mins of inactivity = convo over
+        for user_id, last_seen in list(active_conversations.items()):
+            if now - last_seen > 120:
                 if user_id in conversation_history:
-                    history = conversation_history[user_id][-6:]
-                    summary_prompt = [
-                        {"role": "system", "content": "Summarize this conversation in 2 lines."}
-                    ] + history
+                    summary_prompt = [{"role": "system", "content": "Summarize the following chat in 2 lines."}]
+                    summary_prompt += conversation_history[user_id][-6:]
                     summary = generate_ai_reply(summary_prompt)
-                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:\n\n{summary}")
-                to_remove.append(user_id)
-        for uid in to_remove:
-            del active_conversations[uid]
+                    try:
+                        await client.send_message("Telethonpy_bot", f"📄 Summary of chat with {user_id}:\n\n{summary}")
+                    except Exception as e:
+                        print(f"❌ Could not send summary: {e}")
+                del active_conversations[user_id]
         await asyncio.sleep(30)
 
-# === RUN ===
+# === START EVERYTHING ===
 async def main():
     await client.start()
-    print("🤖 Bot is running!")
-    await asyncio.gather(
-        client.run_until_disconnected(),
-        monitor_summary()
-    )
+    print("🤖 Telegram AI bot running...")
+    await asyncio.gather(client.run_until_disconnected(), monitor_summary())
 
 asyncio.run(main())
+
 
