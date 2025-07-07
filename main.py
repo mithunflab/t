@@ -6,8 +6,6 @@ from flask import Flask
 from collections import defaultdict
 import re
 import time
-from telethon.tl.functions.contacts import ImportContactsRequest
-from telethon.tl.types import InputPhoneContact
 
 # === CONFIG ===
 api_id = 22986717
@@ -15,7 +13,7 @@ api_hash = '1d1206253d640d42f488341e3b4f0a2f'
 groq_api_key = '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'
 session_name = 'session_mithun'
 bot_username = 'Telethonpy_bot'
-no_ai_usernames = ['Telethonpy_bot', 'Lunaclaude_bot']
+ignored_usernames = {'Telethonpy_bot', 'Lunaclaude_bot'}
 
 # === STATE ===
 client = TelegramClient(session_name, api_id, api_hash)
@@ -33,7 +31,7 @@ groq_models = [
     "llama2-70b-4096"
 ]
 
-# === UPTIME SERVER ===
+# === WEB SERVER ===
 app = Flask(__name__)
 
 @app.route("/", methods=["GET", "HEAD"])
@@ -71,60 +69,48 @@ def generate_ai_reply(messages):
 @client.on(events.NewMessage(incoming=True))
 async def handle(event):
     global manual_chatting_with
-
     sender = await event.get_sender()
     user_id = sender.id
-    username = sender.username or ""
     message = event.raw_text.strip()
 
-    # Ignore AI reply for specific bot usernames
-    if username in no_ai_usernames:
-        # Special bot handler for @Telethonpy_bot
-        if username == bot_username:
-            match = re.search(r"(msg|message)\s+(@[\w\d_]+|\+?\d{10,15}|him|her)", message, re.I)
-            if match:
-                target = match.group(2).strip()
+    # Ignore if from excluded bots
+    if sender.username in ignored_usernames:
+        return
+
+    # Handle commands from your bot
+    if sender.username == bot_username:
+        if re.search(r'(?i)\b(msg|message|start chat)\b', message):
+            target = re.findall(r'@\w+|\+?\d{10,15}|him|her', message)
+            if target:
+                target_ref = target[0]
                 try:
-                    if target.lower() in ['him', 'her'] and manual_chatting_with:
-                        await client.send_message(manual_chatting_with, "\U0001F44B Hey! I'm Mithun, let's talk.")
+                    if target_ref.lower() in ['him', 'her'] and manual_chatting_with:
+                        await client.send_message(manual_chatting_with, "👋 Hey! I'm Mithun, let's talk.")
                         active_conversations[manual_chatting_with] = time.time()
-                        await event.reply("\u2705 Chat started with previous person.")
+                        await event.reply("✅ Started chat with them.")
                     else:
-                        if target.startswith("+") or target.isdigit():
-                            result = await client(ImportContactsRequest([
-                                InputPhoneContact(client_id=0, phone=target, first_name="MithunContact", last_name="")
-                            ]))
-                            user = result.users[0] if result.users else None
-                            if user:
-                                await client.send_message(user.id, "\U0001F44B Hey! I'm Mithun, let's talk.")
-                                active_conversations[user.id] = time.time()
-                                await event.reply(f"\u2705 Started chat with {target}")
-                            else:
-                                await event.reply("\u274C Couldn't find or add contact.")
-                        else:
-                            entity = await client.get_entity(target)
-                            await client.send_message(entity, "\U0001F44B Hey! I'm Mithun, let's talk.")
-                            active_conversations[entity.id] = time.time()
-                            await event.reply(f"\u2705 Started chat with {target}.")
+                        entity = await client.get_input_entity(target_ref)
+                        await client.send_message(entity, "👋 Hey! I'm Mithun, let's talk.")
+                        active_conversations[entity.user_id] = time.time()
+                        await event.reply(f"✅ Started chat with {target_ref}.")
                 except Exception as e:
-                    await event.reply(f"\u274C Error: {e}")
+                    await event.reply(f"❌ Could not start chat: {e}")
         return
 
     # Handle pause/force
     if message == "/":
         pause_ai.add(user_id)
-        await event.reply("\U0001F916 Paused AI for this user.")
+        await event.reply("🤖 Paused AI for this user.")
         return
     elif message == "\\":
         force_ai.add(user_id)
-        await event.reply("\U0001F916 Forced AI ON for this user.")
+        await event.reply("🤖 Forced AI ON for this user.")
         return
 
-    # If paused and not forced
     if user_id in pause_ai and user_id not in force_ai:
         return
 
-    # Check if you're manually replying
+    # Manual reply detection
     me = await client.get_me()
     if event.is_private:
         async for msg in client.iter_messages(event.chat_id, limit=1, from_user=me):
@@ -132,54 +118,46 @@ async def handle(event):
                 manual_chatting_with = user_id
                 return
 
-    # If you're chatting manually with this person
     if manual_chatting_with == user_id and user_id not in force_ai:
         return
 
-    # Store conversation
+    # Generate AI reply
     conversation_history[user_id].append({"role": "user", "content": message})
     conversation_history[user_id] = conversation_history[user_id][-6:]
 
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are Mithun. You are chatting casually in English politely mix. Be friendly and real."
-            )
-        }
+        {"role": "system", "content": "You are Mithun. You are chatting casually in Tamil-English mix. Be friendly and real."}
     ] + conversation_history[user_id]
 
     ai_reply = generate_ai_reply(messages)
     await event.reply(ai_reply)
     conversation_history[user_id].append({"role": "assistant", "content": ai_reply})
 
-    # Update last activity
     active_conversations[user_id] = time.time()
 
-# === CONVO SUMMARY CHECKER ===
+# === CONVERSATION MONITOR ===
 async def monitor_summary():
     while True:
         now = time.time()
-        to_remove = []
+        expired = []
         for user_id, last_seen in active_conversations.items():
             if now - last_seen > 120:
                 if user_id in conversation_history:
                     history = conversation_history[user_id][-6:]
-                    summary_prompt = [{
-                        "role": "system",
-                        "content": "Summarize this chat in 5 meaningful lines. Avoid using just emojis or vague words. Mention context and tone."
-                    }] + history
+                    summary_prompt = [
+                        {"role": "system", "content": "Summarize this conversation in 2 lines."}
+                    ] + history
                     summary = generate_ai_reply(summary_prompt)
-                    await client.send_message(bot_username, f"\U0001F4C4 Summary for chat with {user_id}:\n\n{summary}")
-                to_remove.append(user_id)
-        for uid in to_remove:
+                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:\n\n{summary}")
+                expired.append(user_id)
+        for uid in expired:
             del active_conversations[uid]
         await asyncio.sleep(30)
 
 # === RUN ===
 async def main():
     await client.start()
-    print("\U0001F916 Bot is running!")
+    print("🤖 Bot is running!")
     await asyncio.gather(
         client.run_until_disconnected(),
         monitor_summary()
