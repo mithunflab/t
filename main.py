@@ -148,7 +148,7 @@ async def monitor_summaries():
                 if hist:
                     prompt = [{"role": "system", "content": "Summarize this conversation in 10 lines including what Mithun and the user said."}] + hist
                     summary = generate_reply(prompt, use_scout=True)
-                    await client.send_message(bot_username, f"📄 10-line Summary for chat with {uid}:\n\n{summary}")
+                    await client.send_message(bot_username, "📄 10-line Summary for chat with {uid}:\n\n{summary}")
                 done.append(uid)
         for uid in done:
             active_conversations.pop(uid, None)
