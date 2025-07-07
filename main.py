@@ -79,19 +79,20 @@ async def handle(event):
 
     # Handle commands from your bot
     if sender.username == bot_username:
-        if re.search(r'(?i)\b(msg|message|start chat)\b', message):
-            target = re.findall(r'@\w+|\+?\d{10,15}|him|her', message)
-            if target:
-                target_ref = target[0]
+        if re.search(r'(?i)\b(msg|message|start chat|talk to|tell)\b', message):
+            target_match = re.findall(r'@\w+|\+?\d{10,15}|him|her', message)
+            message_content = re.sub(r'(?i)(msg|message|start chat|talk to|tell)\s+(@\w+|\+?\d{10,15}|him|her)', '', message)
+            if target_match:
+                target_ref = target_match[0]
                 try:
                     if target_ref.lower() in ['him', 'her'] and manual_chatting_with:
-                        await client.send_message(manual_chatting_with, "👋 Hey! I'm Mithun, let's talk.")
+                        await client.send_message(manual_chatting_with, message_content.strip() or "👋 Hey! I'm Mithun, let's talk.")
                         active_conversations[manual_chatting_with] = time.time()
                         await event.reply("✅ Started chat with them.")
                     else:
-                        entity = await client.get_input_entity(target_ref)
-                        await client.send_message(entity, "👋 Hey! I'm Mithun, let's talk.")
-                        active_conversations[entity.user_id] = time.time()
+                        entity = await client.get_entity(target_ref)
+                        await client.send_message(entity, message_content.strip() or "👋 Hey! I'm Mithun, let's talk.")
+                        active_conversations[entity.id] = time.time()
                         await event.reply(f"✅ Started chat with {target_ref}.")
                 except Exception as e:
                     await event.reply(f"❌ Could not start chat: {e}")
@@ -145,10 +146,11 @@ async def monitor_summary():
                 if user_id in conversation_history:
                     history = conversation_history[user_id][-6:]
                     summary_prompt = [
-                        {"role": "system", "content": "Summarize this conversation in 2 lines."}
+                        {"role": "system", "content": "Summarize this conversation briefly as Mithun chatted with the person and summarize what they said."}
                     ] + history
                     summary = generate_ai_reply(summary_prompt)
-                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:\n\n{summary}")
+                    await client.send_message(bot_username, f"📄 Summary for chat with {user_id}:
+\n{summary}")
                 expired.append(user_id)
         for uid in expired:
             del active_conversations[uid]
@@ -164,6 +166,4 @@ async def main():
     )
 
 asyncio.run(main())
-
-
 
