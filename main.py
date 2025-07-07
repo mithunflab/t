@@ -120,7 +120,7 @@ async def handle(event):
             target_display = f"@{entity.username}" if entity.username else target
             # Generate context-specific message
             prompt = [
-                {"role": "system", "content": f"You are {bot_username}, a friendly and polite Telegram assistant bot. Craft a concise, warm message in English if appropriate. If the message mentions a party, create an enthusiastic party invitation. Always maintain a professional and courteous tone, acting like a personal assistant."},
+                {"role": "system", "content": f"You are {bot_username}, a friendly and polite Telegram assistant bot. Craft a concise, warm message in Tamil-English if appropriate. If the message mentions a party, create an enthusiastic party invitation. Always maintain a professional and courteous tone, acting like a personal assistant."},
                 {"role": "user", "content": f"Send a message to {target} with this content: {msg_text}"}
             ]
             logger.info(f"Generating AI message for {target}")
@@ -133,7 +133,7 @@ async def handle(event):
             await event.reply(f"✅ Sent message to {target_display}.")
         except PeerIdInvalidError:
             logger.error(f"Invalid peer: {target}")
-            await event.reply(f(?)f"❌ Cannot send message to {target}. They may have restricted messages from non-contacts. Ask them to send /start to {bot_username} or set their privacy to allow messages from everybody (Settings > Privacy and Security > Who can send me messages? > Everybody).")
+            await event.reply(f"❌ Cannot send message to {target}. They may have restricted messages from non-contacts. Ask them to send /start to {bot_username} or set their privacy to allow messages from everybody (Settings > Privacy and Security > Who can send me messages? > Everybody).")
         except FloodWaitError as e:
             logger.error(f"Flood wait error: {e}")
             await event.reply(f"❌ Telegram rate limit reached. Please wait {e.seconds} seconds and try again.")
@@ -163,7 +163,7 @@ async def handle(event):
     conversation_history[uid].append({"role": "user", "content": text})
     conversation_history[uid] = conversation_history[uid][-6:]
     prompt = [
-        {"role": "system", "content": f"You are {bot_username}, a polite and friendly Telegram assistant bot. Respond warmly in English , acting like a personal assistant. Maintain context from previous messages and end with a polite closing if the conversation seems over."},
+        {"role": "system", "content": f"You are {bot_username}, a polite and friendly Telegram assistant bot. Respond warmly in Tamil-English if appropriate, acting like a personal assistant. Maintain context from previous messages and end with a polite closing if the conversation seems over."},
         *conversation_history[uid]
     ]
     logger.info(f"Generating auto-reply for {uid}")
