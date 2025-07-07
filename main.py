@@ -1,4 +1,4 @@
-from telethon import TelegramClient, events
+import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
 from telethon.errors import PeerIdInvalidError, FloodWaitError
 import requests
