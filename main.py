@@ -24,6 +24,8 @@ bot_username = '@Telethonpy_bot'
 ignored_usernames = {'telethonpy_bot', 'lunaclaude_bot'}
 reaction_emoji = '👍'
 summary_interval = 120
+owner_id = int(os.getenv('OWNER_ID', '123456789'))  # Replace with your Telegram user ID
+pause_duration = 300  # 5 minutes in seconds
 
 # === LOGGING ===
 logging.basicConfig(
@@ -43,6 +45,7 @@ conversation_history = defaultdict(list)
 active_conversations = {}
 pause_ai = set()
 force_ai = set()
+temp_pause_expiry = {}  # Tracks temporary pause expirations
 
 fallback_models = [
     scout_model,
@@ -91,6 +94,20 @@ def generate_reply(messages, use_scout=True, use_bot_api=False):
     logger.error("All models failed to generate a reply")
     return "🤖 Sorry, I'm having trouble responding right now. Please try again later."
 
+# === TEMPORARY PAUSE MONITOR ===
+async def monitor_temp_pauses():
+    while True:
+        now = time.time()
+        expired = []
+        for uid, expiry in temp_pause_expiry.items():
+            if now >= expiry:
+                pause_ai.discard(uid)
+                logger.info(f"Unpaused AI for user {uid} after {pause_duration} seconds")
+                expired.append(uid)
+        for uid in expired:
+            temp_pause_expiry.pop(uid, None)
+        await asyncio.sleep(10)
+
 # === MESSAGE HANDLER ===
 @client.on(events.NewMessage(incoming=True))
 async def handle(event):
@@ -103,6 +120,14 @@ async def handle(event):
     # Skip auto-replies for ignored usernames
     if uname in ignored_usernames:
         logger.info(f"Ignoring message from {uname}")
+        return
+
+    # Handle iris stop command (owner only)
+    if text.lower() == "iris stop" and uid == owner_id:
+        pause_ai.add(uid)
+        temp_pause_expiry[uid] = time.time() + pause_duration
+        logger.info(f"Owner paused AI for user {uid} for {pause_duration} seconds")
+        await event.reply(f"⏸️ AI auto-replies paused for this chat for 5 minutes.")
         return
 
     # Handle bot commands
@@ -228,7 +253,8 @@ async def main():
         logger.info(f"Bot started, logged in as {me.username or me.id}")
         await asyncio.gather(
             client.run_until_disconnected(),
-            monitor_summaries()
+            monitor_summaries(),
+            monitor_temp_pauses()
         )
     except ApiIdInvalidError:
         logger.error("Invalid api_id/api_hash combination. Please verify credentials at https://my.telegram.org and ensure they match the Telegram account that created the bot.")
