@@ -1,5 +1,6 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
+from telethon.errors import PeerIdInvalidError, FloodWaitError
 import requests
 import asyncio
 import threading
@@ -13,7 +14,7 @@ import logging
 # === CONFIG ===
 api_id = int(os.getenv('API_ID', 22986717))
 api_hash = os.getenv('API_HASH', '2d1206253d640d42f488341e3b4f0a2f')
-session_name = '/opt/render/project/src/session_mithun'  # Adjusted for Render's filesystem
+session_name = '/opt/render/project/src/session_mithun'
 groq_key_auto_reply = os.getenv('GROQ_KEY_AUTO_REPLY', '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')
 groq_key_bot = os.getenv('GROQ_KEY_BOT', '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')
 scout_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
@@ -28,7 +29,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('bot.log')  # Log to a file for Render
+        logging.FileHandler('/opt/render/project/src/bot.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -74,9 +75,10 @@ def generate_reply(messages, use_scout=True, use_bot_api=False):
                 json={
                     "model": model,
                     "messages": messages[-10:],
-                    "temperature": 0.7
+                    "temperature": 0.7,
+                    "max_tokens": 200
                 },
-                timeout=10
+                timeout=5
             )
             res.raise_for_status()
             j = res.json()
@@ -121,21 +123,29 @@ async def handle(event):
                     entity_id = manual_chatting_with
                     target_display = target
                 else:
+                    logger.info(f"Resolving entity for {target}")
                     entity = await client.get_entity(target)
                     entity_id = entity.id
                     target_display = f"@{entity.username}" if entity.username else target
                 # Generate context-specific message
                 prompt = [
-                    {"role": "system", "content": "You are Mithun, a polite assistant. Craft a friendly and warm invitation message in Tamil-English if appropriate, based on the user's request. Ensure the message is relevant to the topic provided (e.g., inviting to a party)."},
-                    {"role": "user", "content": f"Invite {target} to a party with this message: {msg_text}"}
+                    {"role": "system", "content": "You are Mithun, a polite assistant. Craft a friendly and warm invitation message from your Telegram account in Tamil-English if appropriate. If the message mentions a party, ensure it’s a clear, enthusiastic party invitation. Keep it concise and relevant."},
+                    {"role": "user", "content": f"Invite {target} to an event with this message: {msg_text}"}
                 ]
+                logger.info(f"Generating AI message for {target}")
                 ai_msg = generate_reply(prompt, use_scout=True, use_bot_api=True)
-                logger.info(f"Sending AI-generated message to {target_display}: {ai_msg}")
+                logger.info(f"Sending message to {target_display}: {ai_msg}")
                 await client.send_message(entity_id, ai_msg)
                 active_conversations[entity_id] = time.time()
                 conversation_history[entity_id].append({"role": "user", "content": msg_text})
                 conversation_history[entity_id].append({"role": "assistant", "content": ai_msg})
-                await event.reply(f"✅ Started chat with {target_display}.")
+                await event.reply(f"✅ Sent message to {target_display}.")
+            except PeerIdInvalidError:
+                logger.error(f"Invalid peer: {target}")
+                await event.reply(f"❌ Cannot send message to {target}. Ensure you’ve interacted with them before or check their privacy settings.")
+            except FloodWaitError as e:
+                logger.error(f"Flood wait error: {e}")
+                await event.reply(f"❌ Telegram rate limit reached. Please wait {e.seconds} seconds and try again.")
             except Exception as e:
                 logger.error(f"Failed to send message to {target}: {e}")
                 await event.reply(f"❌ Failed to send message: {e}")
@@ -177,6 +187,7 @@ async def handle(event):
         {"role": "system", "content": "You are Mithun, a polite and friendly assistant. Respond warmly in Tamil-English if appropriate, and always maintain a courteous tone. End the conversation with a polite closing if it seems to be over."},
         *conversation_history[uid]
     ]
+    logger.info(f"Generating auto-reply for {uid}")
     ai_reply = generate_reply(prompt, use_scout=False, use_bot_api=False)
     logger.info(f"Auto-replying to {uid}: {ai_reply}")
     reply_msg = await event.reply(ai_reply)
@@ -201,6 +212,7 @@ async def monitor_summaries():
                         {"role": "system", "content": "Summarize this conversation in up to 10 lines, including what Mithun and the user said. Use a polite and professional tone."},
                         *hist
                     ]
+                    logger.info(f"Generating summary for {uid}")
                     summary = generate_reply(prompt, use_scout=True, use_bot_api=True)
                     try:
                         user = await client.get_entity(uid)
@@ -222,6 +234,7 @@ async def monitor_summaries():
 # === MAIN ===
 async def main():
     try:
+        logger.info("Starting Telethon client")
         await client.start()
         me = await client.get_me()
         logger.info(f"Bot started, logged in as {me.username or me.id}")
