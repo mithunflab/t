@@ -1,6 +1,6 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
-from telethon.errors import PeerIdInvalidError, FloodWaitError
+from telethon.errors import PeerIdInvalidError, FloodWaitError, SessionPasswordNeededError
 import requests
 import asyncio
 import threading
@@ -12,9 +12,8 @@ import os
 import logging
 
 # === CONFIG ===
-api_id = int(os.getenv('API_ID', 22986717))
-api_hash = os.getenv('API_HASH', '2d1206253d640d42f488341e3b4f0a2f')
-session_name = '/opt/render/project/src/session_mithun'
+bot_token = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Replace with your @Telethonpy_bot token
+session_name = '/opt/render/project/src/bot_session'  # Bot session file
 groq_key_auto_reply = os.getenv('GROQ_KEY_AUTO_REPLY', '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')
 groq_key_bot = os.getenv('GROQ_KEY_BOT', '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')
 scout_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
@@ -35,11 +34,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === STATE ===
-client = TelegramClient(session_name, api_id, api_hash)
+client = TelegramClient(session_name, api_id=None, api_hash=None, bot_token=bot_token)
 app = Flask(__name__)
 conversation_history = defaultdict(list)
 active_conversations = {}
-manual_chatting_with = None
 pause_ai = set()
 force_ai = set()
 
@@ -93,8 +91,6 @@ def generate_reply(messages, use_scout=True, use_bot_api=False):
 # === MESSAGE HANDLER ===
 @client.on(events.NewMessage(incoming=True))
 async def handle(event):
-    global manual_chatting_with
-
     sender = await event.get_sender()
     uid = sender.id
     uname = (sender.username or "").lower()
@@ -107,48 +103,45 @@ async def handle(event):
         return
 
     # Handle bot commands
-    if uname == bot_username.lower():
-        if re.search(r'\b(start a chat|msg|message|text|talk to|tell)\b', text, re.I):
-            logger.info(f"Processing bot command: {text}")
-            match = re.search(r'(?i)(@[\w\d_]+|\+?\d{10,15}|him|her)', text)
-            if not match:
-                logger.warning("No valid target user found in command")
-                await event.reply("❗ Please specify a valid user (e.g., @username or phone number).")
-                return
-            target = match.group(1).lstrip('@')
-            msg_text = re.sub(r'(?i)(start a chat|msg|message|text|talk to|tell)\s+(@[\w\d_]+|\+?\d{10,15}|him|her)', '', text).strip()
-            logger.info(f"Target: {target}, Message: {msg_text}")
-            try:
-                if target.lower() in ['him', 'her'] and manual_chatting_with:
-                    entity_id = manual_chatting_with
-                    target_display = target
-                else:
-                    logger.info(f"Resolving entity for {target}")
-                    entity = await client.get_entity(target)
-                    entity_id = entity.id
-                    target_display = f"@{entity.username}" if entity.username else target
-                # Generate context-specific message
-                prompt = [
-                    {"role": "system", "content": "You are Mithun, a polite assistant. Craft a friendly and warm invitation message from your Telegram account in Tamil-English if appropriate. If the message mentions a party, ensure it’s a clear, enthusiastic party invitation. Keep it concise and relevant."},
-                    {"role": "user", "content": f"Invite {target} to an event with this message: {msg_text}"}
-                ]
-                logger.info(f"Generating AI message for {target}")
-                ai_msg = generate_reply(prompt, use_scout=True, use_bot_api=True)
-                logger.info(f"Sending message to {target_display}: {ai_msg}")
-                await client.send_message(entity_id, ai_msg)
-                active_conversations[entity_id] = time.time()
-                conversation_history[entity_id].append({"role": "user", "content": msg_text})
-                conversation_history[entity_id].append({"role": "assistant", "content": ai_msg})
-                await event.reply(f"✅ Sent message to {target_display}.")
-            except PeerIdInvalidError:
-                logger.error(f"Invalid peer: {target}")
-                await event.reply(f"❌ Cannot send message to {target}. Ensure you’ve interacted with them before or check their privacy settings.")
-            except FloodWaitError as e:
-                logger.error(f"Flood wait error: {e}")
-                await event.reply(f"❌ Telegram rate limit reached. Please wait {e.seconds} seconds and try again.")
-            except Exception as e:
-                logger.error(f"Failed to send message to {target}: {e}")
-                await event.reply(f"❌ Failed to send message: {e}")
+    if event.is_private and re.search(r'\b(start a chat|msg|message|text|talk to|tell)\b', text, re.I):
+        logger.info(f"Processing bot command: {text}")
+        match = re.search(r'(?i)(@[\w\d_]+|\+?\d{10,15})', text)
+        if not match:
+            logger.warning("No valid target user found in command")
+            await event.reply("❗ Please specify a valid user (e.g., @username or phone number).")
+            return
+        target = match.group(1).lstrip('@')
+        msg_text = re.sub(r'(?i)(start a chat|msg|message|text|talk to|tell)\s+(@[\w\d_]+|\+?\d{10,15})', '', text).strip()
+        logger.info(f"Target: {target}, Message: {msg_text}")
+        try:
+            logger.info(f"Resolving entity for {target}")
+            entity = await client.get_entity(target)
+            entity_id = entity.id
+            target_display = f"@{entity.username}" if entity.username else target
+            # Generate context-specific message
+            prompt = [
+                {"role": "system", "content": f"You are {bot_username}, a polite Telegram bot. Craft a friendly, concise invitation from {bot_username} in Tamil-English if appropriate. If the message mentions a party, ਪ
+
+System: arty, make it an enthusiastic party invitation."},
+                {"role": "user", "content": f"Invite {target} to an event with this message: {msg_text}"}
+            ]
+            logger.info(f"Generating AI message for {target}")
+            ai_msg = generate_reply(prompt, use_scout=True, use_bot_api=True)
+            logger.info(f"Sending message to {target_display}: {ai_msg}")
+            await client.send_message(entity_id, ai_msg)
+            active_conversations[entity_id] = time.time()
+            conversation_history[entity_id].append({"role": "user", "content": msg_text})
+            conversation_history[entity_id].append({"role": "assistant", "content": ai_msg})
+            await event.reply(f"✅ Sent message to {target_display}.")
+        except PeerIdInvalidError:
+            logger.error(f"Invalid peer: {target}")
+            await event.reply(f"❌ Cannot send message to {target}. Ð°Ð½Ð°Ð¿Ð¾Ð»Ð°Ð²Ð°Ð½Ð¸Ñ ÐºÐ¾Ð½ÑÐ°ÐºÑÐ¾Ð² Ñ Ð±Ð¾ÑÐ¾Ð¼. Ð¡Ð¿ÑÐ¾ÑÐ¸ÑÐµ Ð¿Ð¾Ð»ÑÐ·Ð¾Ð²Ð°ÑÐµÐ»Ñ {target} Ð¾ÑÐ¿ÑÐ°Ð²Ð¸ÑÑ Ð²Ð°Ð¼ ÑÐ¾Ð¾Ð±ÑÐµÐ½Ð¸Ðµ Ð¸Ð»Ð¸ Ð´Ð¾Ð±Ð°Ð²ÑÑÐµ Ð±Ð¾Ñ Ð² ÑÐ¿Ð¸ÑÐ¾Ðº ÐºÐ¾Ð½ÑÐ°ÐºÑÐ¾Ð².")
+        except FloodWaitError as e:
+            logger.error(f"Flood wait error: {e}")
+            await event.reply(f"❌ Telegram rate limit reached. Please wait {e.seconds} seconds and try again.")
+        except Exception as e:
+            logger.error(f"Failed to send message to {target}: {e}")
+            await event.reply(f"❌ Failed to send message: {e}")
         return
 
     # Pause/Force AI commands
@@ -168,23 +161,11 @@ async def handle(event):
         logger.info(f"Skipping auto-reply for paused chat {uid}")
         return
 
-    # Check for manual reply
-    me = await client.get_me()
-    if event.is_private:
-        async for m in client.iter_messages(event.chat_id, limit=1, from_user=me):
-            if m.date.timestamp() > event.message.date.timestamp():
-                manual_chatting_with = uid
-                logger.info(f"Manual reply detected, setting manual_chatting_with to {uid}")
-                return
-    if manual_chatting_with == uid and uid not in force_ai:
-        logger.info(f"Skipping auto-reply due to manual chat with {uid}")
-        return
-
     # Auto-reply
     conversation_history[uid].append({"role": "user", "content": text})
     conversation_history[uid] = conversation_history[uid][-6:]
     prompt = [
-        {"role": "system", "content": "You are Mithun, a polite and friendly assistant. Respond warmly in Tamil-English if appropriate, and always maintain a courteous tone. End the conversation with a polite closing if it seems to be over."},
+        {"role": "system", "content": f"You are {bot_username}, a polite and friendly Telegram bot. Respond warmly in Tamil-English if appropriate, and always maintain a courteous tone. End the conversation with a polite closing if it seems to be over."},
         *conversation_history[uid]
     ]
     logger.info(f"Generating auto-reply for {uid}")
@@ -209,7 +190,7 @@ async def monitor_summaries():
                 hist = conversation_history.get(uid, [])[-8:]
                 if hist:
                     prompt = [
-                        {"role": "system", "content": "Summarize this conversation in up to 10 lines, including what Mithun and the user said. Use a polite and professional tone."},
+                        {"role": "system", "content": "Summarize this conversation in up to 10 lines, including what the bot and the user said. Use a polite and professional tone."},
                         *hist
                     ]
                     logger.info(f"Generating summary for {uid}")
@@ -234,8 +215,8 @@ async def monitor_summaries():
 # === MAIN ===
 async def main():
     try:
-        logger.info("Starting Telethon client")
-        await client.start()
+        logger.info("Starting Telethon bot client")
+        await client.start(bot_token=bot_token)
         me = await client.get_me()
         logger.info(f"Bot started, logged in as {me.username or me.id}")
         await asyncio.gather(
