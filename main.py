@@ -1,4 +1,4 @@
-import TelegramClient, events
+from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityMention, MessageEntityTextUrl
 from telethon.errors import PeerIdInvalidError, FloodWaitError
 import requests
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === STATE ===
-client = TelegramClient(session_name, api_id=None, api_hash=None, bot_token=bot_token)
+client = TelegramClient(session_name, api_id=0, api_hash='')  # Dummy values; bot_token used in start()
 app = Flask(__name__)
 conversation_history = defaultdict(list)
 active_conversations = {}
