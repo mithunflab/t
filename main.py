@@ -12,8 +12,11 @@ import os
 import logging
 
 # === CONFIG ===
-bot_token = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Replace with @Telethonpy_bot token
-session_name = '/opt/render/project/src/bot_session'
+# Environment variables with fallbacks from provided values
+api_id = int(os.getenv('API_ID', '22986717'))
+api_hash = os.getenv('API_HASH', '2d1206253d640d42f488341e3b4f0a2f')
+bot_token = os.getenv('BOT_TOKEN', '7275314987:AAHfuJwuR6-9L8Powjoc7UCLuT89KXpVi0I')
+session_name = '/opt/render/project/src/bot_session'  # Render-compatible session file
 groq_key_auto_reply = os.getenv('GROQ_KEY_AUTO_REPLY', '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')
 groq_key_bot = os.getenv('GROQ_KEY_BOT', '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')
 scout_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
@@ -34,7 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === STATE ===
-client = TelegramClient(session_name, api_id=0, api_hash='')  # Dummy values; bot_token used in start()
+client = TelegramClient(session_name, api_id=api_id, api_hash=api_hash)
 app = Flask(__name__)
 conversation_history = defaultdict(list)
 active_conversations = {}
@@ -63,7 +66,7 @@ def generate_reply(messages, use_scout=True, use_bot_api=False):
     models = [scout_model] if use_scout else fallback_models
     for model in models:
         try:
-            logger.info(f"Calling Groq API with model {model}, bot_api={use_bot_api}")
+            logger.info(f"Calling Groq API with model {model}, bot_api={use_bot_api}, key={groq_key[:10]}...")
             res = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
